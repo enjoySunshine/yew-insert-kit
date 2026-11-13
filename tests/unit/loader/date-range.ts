@@ -1,5 +1,8 @@
 import { expect } from 'chai';
-import { DateRange } from '../../../src/loader/date-range';
+import {
+  DateRange,
+  resolveEndOnNextDateRanges,
+} from '../../../src/loader/date-range';
 import { AttrList } from '../../../src/utils/attr-list';
 
 describe('DateRange class', function () {
@@ -220,5 +223,65 @@ describe('DateRange class', function () {
     //     'START-DATE is missing quotes',
     //   );
     // });
+  });
+
+  describe('END-ON-NEXT', function () {
+    function createDateRanges(
+      ...attributeLists: AttrList[]
+    ): Record<string, DateRange | undefined> {
+      const dateRanges: Record<string, DateRange | undefined> = {};
+      attributeLists.forEach((attrs) => {
+        const dateRange = new DateRange(attrs);
+        dateRanges[dateRange.id] = dateRange;
+      });
+      return dateRanges;
+    }
+
+    it('ends where the next DateRange with the same CLASS starts', function () {
+      const dateRanges = createDateRanges(
+        new AttrList(
+          'ID="spot",CLASS="com.apple.hls.interstitial",START-DATE="2026-11-12T00:00:08.000Z",END-ON-NEXT=YES,PLANNED-DURATION=3,X-ASSET-URI="ad-a.m3u8"',
+        ),
+        new AttrList(
+          'ID="tail",CLASS="com.apple.hls.interstitial",START-DATE="2026-11-12T00:00:14.000Z",DURATION=4,X-ASSET-URI="ad-b.m3u8"',
+        ),
+      );
+      resolveEndOnNextDateRanges(dateRanges);
+      const spot = dateRanges.spot!;
+      expect(spot.duration).to.equal(6);
+      expect(spot.plannedDuration, 'plannedDuration').to.equal(3);
+      expect(spot.endDate?.toISOString()).to.equal('2026-11-12T00:00:14.000Z');
+    });
+
+    it('ignores DateRanges of a different CLASS', function () {
+      const dateRanges = createDateRanges(
+        new AttrList(
+          'ID="spot",CLASS="com.apple.hls.interstitial",START-DATE="2026-11-12T00:00:08.000Z",END-ON-NEXT=YES,PLANNED-DURATION=3,X-ASSET-URI="ad-a.m3u8"',
+        ),
+        new AttrList(
+          'ID="mark",CLASS="com.example.beacon",START-DATE="2026-11-12T00:00:10.000Z",DURATION=1',
+        ),
+        new AttrList(
+          'ID="other",CLASS="com.example.other",START-DATE="2026-11-12T00:00:12.000Z",DURATION=1',
+        ),
+      );
+      resolveEndOnNextDateRanges(dateRanges);
+      expect(dateRanges.spot!.duration).to.be.null;
+      expect(dateRanges.spot!.plannedDuration).to.equal(3);
+    });
+
+    it('uses a stated DURATION over the end of the next DateRange', function () {
+      const dateRanges = createDateRanges(
+        new AttrList(
+          'ID="spot",CLASS="com.apple.hls.interstitial",START-DATE="2026-11-12T00:00:08.000Z",DURATION=5,END-ON-NEXT=YES,X-ASSET-URI="ad-a.m3u8"',
+        ),
+        new AttrList(
+          'ID="tail",CLASS="com.apple.hls.interstitial",START-DATE="2026-11-12T00:00:14.000Z",DURATION=4,X-ASSET-URI="ad-b.m3u8"',
+        ),
+      );
+      resolveEndOnNextDateRanges(dateRanges);
+      expect(dateRanges.spot!.duration).to.equal(5);
+      expect(dateRanges.spot!.statedDuration).to.equal(5);
+    });
   });
 });

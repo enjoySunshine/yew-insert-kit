@@ -1117,6 +1117,315 @@ fileSequence4.ts
         ]);
       });
     });
+
+    describe('END-ON-NEXT', function () {
+      const spot =
+        '#EXT-X-DATERANGE:ID="spot",CLASS="com.apple.hls.interstitial",START-DATE="2026-11-12T00:00:08.000Z",END-ON-NEXT=YES,PLANNED-DURATION=3,X-ASSET-URI="http://example/ad-a.m3u8"';
+      const tail14 =
+        '#EXT-X-DATERANGE:ID="tail",CLASS="com.apple.hls.interstitial",START-DATE="2026-11-12T00:00:14.000Z",DURATION=4,X-ASSET-URI="http://example/ad-b.m3u8"';
+      const tail16 =
+        '#EXT-X-DATERANGE:ID="tail",CLASS="com.apple.hls.interstitial",START-DATE="2026-11-12T00:00:16.000Z",DURATION=4,X-ASSET-URI="http://example/ad-b.m3u8"';
+      const mark =
+        '#EXT-X-DATERANGE:ID="mark",CLASS="com.example.beacon",START-DATE="2026-11-12T00:00:10.000Z",DURATION=1';
+      const endlist = '#EXT-X-ENDLIST';
+
+      function playlist(tail: string | null) {
+        return `#EXTM3U
+#EXT-X-VERSION:7
+#EXT-X-TARGETDURATION:6
+#EXT-X-PROGRAM-DATE-TIME:2026-11-12T00:00:00.000Z
+#EXT-X-MAP:URI="init.mp4"
+${spot}
+#EXTINF:6,
+s0.ts
+#EXTINF:6,
+s1.ts
+${mark}
+#EXTINF:6,
+s2.ts
+#EXTINF:6,
+s3.ts
+${tail || ''}
+${endlist}`;
+      }
+
+      function getInterstitials() {
+        const interstitials = interstitialsController.interstitialsManager;
+        expect(interstitials, 'interstitialsManager').to.be.an('object');
+        return interstitials!;
+      }
+
+      it('ends the schedule item at the start of the next interstitial (6s duration, planned duration remains 3s)', function () {
+        setLoadedLevelDetails(playlist(tail14));
+        const interstitials = getInterstitials();
+        const events = interstitials.events;
+        const schedule = interstitials.schedule;
+        // The beacon (mark) is not an interstitial and does not appear in the schedule
+        expect(events).to.have.lengthOf(2);
+        expect(events[0].identifier).to.equal('spot');
+        expect(events[0].duration).to.equal(6, 'spot.duration');
+        expect(
+          events[0].dateRange.plannedDuration,
+          'spot plannedDuration',
+        ).to.equal(3);
+        expectScheduleToInclude(
+          schedule,
+          [
+            {
+              previousEvent: null,
+              nextEvent: {
+                identifier: 'spot',
+              },
+              start: 0,
+              end: 8,
+              playout: { start: 0, end: 8 },
+            },
+            {
+              event: {
+                identifier: 'spot',
+              },
+              start: 8,
+              end: 14,
+              playout: { start: 8, end: 14 },
+            },
+            {
+              event: {
+                identifier: 'tail',
+              },
+              start: 14,
+              end: 18,
+              playout: { start: 14, end: 18 },
+            },
+            {
+              previousEvent: {
+                identifier: 'tail',
+              },
+              nextEvent: null,
+              start: 18,
+              end: 24,
+              playout: { start: 18, end: 24 },
+            },
+          ],
+          'spot-ends-on-next',
+        );
+        // spot is playing at 12s
+        const indexAt12 = (
+          interstitialsController as any
+        ).schedule.findItemIndexAtTime(12, 'playout');
+        expect(schedule[indexAt12].event?.identifier).to.equal('spot');        // Interstitials that do not occupy the timeline add nothing to the
+        // integrated duration: 8s + 6s of primary (the 11-14s gap is gone)
+        expect(
+          interstitials.integrated.duration,
+          'integrated duration',
+        ).to.equal(14);
+        expect(interstitials.primary.duration).to.equal(24);
+      });
+
+      it('uses the planned duration when there is no next interstitial', function () {
+        setLoadedLevelDetails(playlist(null));
+        const interstitials = getInterstitials();
+        expect(interstitials.events).to.have.lengthOf(1);
+        expect(interstitials.events[0].duration).to.equal(3);
+        expectScheduleToInclude(
+          interstitials.schedule,
+          [
+            {
+              nextEvent: {
+                identifier: 'spot',
+              },
+              start: 0,
+              end: 8,
+              playout: { start: 0, end: 8 },
+            },
+            {
+              event: {
+                identifier: 'spot',
+              },
+              start: 8,
+              end: 11,
+              playout: { start: 8, end: 11 },
+            },
+            {
+              previousEvent: {
+                identifier: 'spot',
+              },
+              nextEvent: null,
+              start: 11,
+              end: 24,
+              playout: { start: 11, end: 24 },
+            },
+          ],
+          'spot-planned-duration',
+        );
+      });
+
+      it('ends at a later next interstitial (8s duration)', function () {
+        setLoadedLevelDetails(playlist(tail16));
+        const interstitials = getInterstitials();
+        expect(interstitials.events[0].duration).to.equal(8);
+        expectScheduleToInclude(
+          interstitials.schedule,
+          [
+            {
+              nextEvent: {
+                identifier: 'spot',
+              },
+              start: 0,
+              end: 8,
+              playout: { start: 0, end: 8 },
+            },
+            {
+              event: {
+                identifier: 'spot',
+              },
+              start: 8,
+              end: 16,
+              playout: { start: 8, end: 16 },
+            },
+            {
+              event: {
+                identifier: 'tail',
+              },
+              start: 16,
+              end: 20,
+              playout: { start: 16, end: 20 },
+            },
+            {
+              previousEvent: {
+                identifier: 'tail',
+              },
+              nextEvent: null,
+              start: 20,
+              end: 24,
+              playout: { start: 20, end: 24 },
+            },
+          ],
+          'spot-ends-on-later-next',
+        );
+      });
+
+      it('uses a stated DURATION over the end of the next interstitial', function () {
+        const playlistWithSpotDuration = playlist(tail14).replace(
+          'END-ON-NEXT=YES,PLANNED-DURATION=3',
+          'DURATION=5,END-ON-NEXT=YES',
+        );
+        setLoadedLevelDetails(playlistWithSpotDuration);
+        const interstitials = getInterstitials();
+        expect(interstitials.events[0].duration).to.equal(5);
+        expectScheduleToInclude(
+          interstitials.schedule,
+          [
+            {
+              nextEvent: {
+                identifier: 'spot',
+              },
+              start: 0,
+              end: 8,
+              playout: { start: 0, end: 8 },
+            },
+            {
+              event: {
+                identifier: 'spot',
+              },
+              start: 8,
+              end: 13,
+              playout: { start: 8, end: 13 },
+            },
+            {
+              previousEvent: {
+                identifier: 'spot',
+              },
+              nextEvent: {
+                identifier: 'tail',
+              },
+              start: 13,
+              end: 14,
+              playout: { start: 13, end: 14 },
+            },
+            {
+              event: {
+                identifier: 'tail',
+              },
+              start: 14,
+              end: 18,
+              playout: { start: 14, end: 18 },
+            },
+            {
+              previousEvent: {
+                identifier: 'tail',
+              },
+              nextEvent: null,
+              start: 18,
+              end: 24,
+              playout: { start: 18, end: 24 },
+            },
+          ],
+          'spot-stated-duration',
+        );
+      });
+
+      it('keeps the resolved duration when the asset is 9s long', function () {
+        setLoadedLevelDetails(playlist(tail14));
+        const interstitials = getInterstitials();
+        const spotEvent = interstitials.events[0];
+        expect(spotEvent.identifier).to.equal('spot');
+        // Asset is loaded and reports a 9s duration
+        spotEvent.assetList.push({
+          parentIdentifier: 'spot',
+          identifier: 'spot-1-0',
+          duration: 9,
+          startOffset: 0,
+          timelineStart: spotEvent.timelineStart,
+          uri: 'http://example/ad-a.m3u8',
+        });
+        spotEvent.assetListResponse = { ASSETS: [] };
+        expect(spotEvent.duration, 'spot.duration').to.equal(6);
+        expectScheduleToInclude(
+          interstitials.schedule,
+          [
+            {
+              previousEvent: null,
+              nextEvent: {
+                identifier: 'spot',
+              },
+              start: 0,
+              end: 8,
+              playout: { start: 0, end: 8 },
+            },
+            {
+              event: {
+                identifier: 'spot',
+              },
+              start: 8,
+              end: 14,
+              playout: { start: 8, end: 14 },
+            },
+            {
+              event: {
+                identifier: 'tail',
+              },
+              start: 14,
+              end: 18,
+              playout: { start: 14, end: 18 },
+            },
+            {
+              previousEvent: {
+                identifier: 'tail',
+              },
+              nextEvent: null,
+              start: 18,
+              end: 24,
+              playout: { start: 18, end: 24 },
+            },
+          ],
+          'spot-asset-loaded',
+        );
+        expect(
+          spotEvent.assetList[0].timelineStart,
+          'asset timeline start',
+        ).to.equal(8);
+      });
+    });
   });
 
   describe('Interstitial Playback and API Events', function () {

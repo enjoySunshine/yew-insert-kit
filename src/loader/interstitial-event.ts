@@ -245,13 +245,18 @@ export class InterstitialEvent {
 
   get duration(): number {
     const playoutLimit = this.playoutLimit;
+    const dateRange = this.dateRange;
     let duration: number;
-    if (this._duration !== null) {
+    if (dateRange.endOnNext && dateRange.duration !== null) {
+      // END-ON-NEXT (or DURATION when both are present) takes precedence over
+      // durations measured from loaded assets
+      duration = dateRange.duration;
+    } else if (this._duration !== null) {
       duration = this._duration;
-    } else if (this.dateRange.duration) {
-      duration = this.dateRange.duration;
+    } else if (dateRange.duration) {
+      duration = dateRange.duration;
     } else {
-      duration = this.dateRange.plannedDuration || 0;
+      duration = dateRange.plannedDuration || 0;
     }
     if (!isNaN(playoutLimit) && playoutLimit < duration) {
       duration = playoutLimit;

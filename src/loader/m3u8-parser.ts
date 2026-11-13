@@ -1,5 +1,5 @@
 import { buildAbsoluteURL } from 'url-toolkit';
-import { DateRange } from './date-range';
+import { DateRange, resolveEndOnNextDateRanges } from './date-range';
 import { Fragment, Part } from './fragment';
 import { LevelDetails } from './level-details';
 import { LevelKey } from './level-key';
@@ -794,6 +794,9 @@ export default class M3U8Parser {
     level.totalduration = totalduration;
     if (programDateTimes.length && level.dateRangeTagCount && firstFragment) {
       mapDateRanges(programDateTimes, level);
+    }
+    if (level.dateRangeTagCount) {
+      resolveEndOnNextDateRanges(level.dateRanges);
     }
 
     level.endCC = discontinuityCounter;

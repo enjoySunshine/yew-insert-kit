@@ -51,6 +51,7 @@ export class DateRange {
   public tagOrder: number;
   private _startDate: Date;
   private _endDate?: Date;
+  private _endDateAtEndOnNext?: Date;
   private _dateAtEnd?: Date;
   private _cue?: DateRangeCue;
   private _badValueForSameId?: string;
@@ -88,6 +89,7 @@ export class DateRange {
       this._startDate = dateRangeWithSameId._startDate;
       this._cue = dateRangeWithSameId._cue;
       this._endDate = dateRangeWithSameId._endDate;
+      this._endDateAtEndOnNext = dateRangeWithSameId._endDateAtEndOnNext;
       this._dateAtEnd = dateRangeWithSameId._dateAtEnd;
     } else {
       this._startDate = new Date(dateRangeAttr[DateRangeAttribute.START_DATE]);
@@ -144,8 +146,18 @@ export class DateRange {
     return this._startDate;
   }
 
+  /**
+   * Resolve the end of a DateRange with `END-ON-NEXT=YES` to the start of the
+   * next DateRange in the playlist with the same CLASS.
+   */
+  public setEndOnNext(endDate: Date | null) {
+    this._endDateAtEndOnNext = endDate || undefined;
+    this._dateAtEnd = undefined;
+  }
+
   get endDate(): Date | null {
-    const dateAtEnd = this._endDate || this._dateAtEnd;
+    const dateAtEnd =
+      this._endDate || this._endDateAtEndOnNext || this._dateAtEnd;
     if (dateAtEnd) {
       return dateAtEnd;
     }
@@ -158,7 +170,11 @@ export class DateRange {
     return null;
   }
 
-  get duration(): number | null {
+  /**
+   * Duration stated by `DURATION` or `END-DATE` attributes. Unlike `duration`,
+   * this does not include the end resolved from `END-ON-NEXT`.
+   */
+  get statedDuration(): number | null {
     if (DateRangeAttribute.DURATION in this.attr) {
       const duration = this.attr.decimalFloatingPoint(
         DateRangeAttribute.DURATION,
@@ -166,8 +182,24 @@ export class DateRange {
       if (Number.isFinite(duration)) {
         return duration;
       }
-    } else if (this._endDate) {
+      return null;
+    }
+    if (this._endDate) {
       return (this._endDate.getTime() - this._startDate.getTime()) / 1000;
+    }
+    return null;
+  }
+
+  get duration(): number | null {
+    const statedDuration = this.statedDuration;
+    if (statedDuration !== null) {
+      return statedDuration;
+    }
+    // END-ON-NEXT: the range ends where the next range with the same CLASS
+    // begins (`_endDateAtEndOnNext` is undefined until resolved)
+    const endDate = this._endDateAtEndOnNext;
+    if (this.endOnNext && endDate) {
+      return (endDate.getTime() - this._startDate.getTime()) / 1000;
     }
     return null;
   }
@@ -225,5 +257,46 @@ export class DateRange {
       return 'Unknown (check DURATION(|END|NEXT), CLASS, and CUE)';
     }
     return null;
+  }
+}
+
+/**
+ * Resolve `END-ON-NEXT` DateRanges in a playlist to the start of the next
+ * DateRange with the same CLASS. Dates are re-resolved on each call so that
+ * ranges merged from later playlist updates are taken into account.
+ */
+export function resolveEndOnNextDateRanges(
+  dateRanges: Record<string, DateRange | undefined>,
+) {
+  const ids = Object.keys(dateRanges);
+  // Sort by start date (and tag order for ranges sharing a start date)
+  const dateRangeList = ids
+    .map((id) => dateRanges[id]!)
+    .sort((a, b) => {
+      const startA = a.startDate.getTime();
+      const startB = b.startDate.getTime();
+      if (startA !== startB) {
+        return startA - startB;
+      }
+      return a.tagOrder - b.tagOrder;
+    });
+  for (let i = 0; i < dateRangeList.length; i++) {
+    const dateRange = dateRangeList[i];
+    // DURATION (or END-DATE) takes precedence over END-ON-NEXT
+    if (!dateRange.endOnNext || dateRange.statedDuration !== null) {
+      continue;
+    }
+    let endDate: Date | undefined;
+    for (let j = i + 1; j < dateRangeList.length; j++) {
+      const nextDateRange = dateRangeList[j];
+      if (
+        nextDateRange.class === dateRange.class &&
+        nextDateRange.startDate.getTime() > dateRange.startDate.getTime()
+      ) {
+        endDate = nextDateRange.startDate;
+        break;
+      }
+    }
+    dateRange.setEndOnNext(endDate || null);
   }
 }

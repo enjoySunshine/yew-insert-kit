@@ -3,7 +3,7 @@
  */
 
 import { stringify } from './safe-json-stringify';
-import { DateRange } from '../loader/date-range';
+import { DateRange, resolveEndOnNextDateRanges } from '../loader/date-range';
 import { assignProgramDateTime, mapDateRanges } from '../loader/m3u8-parser';
 import { PlaylistLevelType } from '../types/loader';
 import type { ILogger } from './logger';
@@ -372,6 +372,7 @@ function mergeDateRanges(
   const mergeIds = Object.keys(dateRanges);
   const mergeCount = mergeIds.length;
   if (!mergeCount) {
+    resolveEndOnNextDateRanges(deltaDateRanges);
     return deltaDateRanges;
   }
   Object.keys(deltaDateRanges).forEach((id) => {
@@ -390,6 +391,7 @@ function mergeDateRanges(
       );
     }
   });
+  resolveEndOnNextDateRanges(dateRanges);
   return dateRanges;
 }
 
